@@ -85,7 +85,7 @@ client.on('message', async (message) => {
                             message.guild.channels.forEach(function (channel) {
                                 if (channel.name === "mentors") {
                                     channel.send("<@&" + rol.id + ">" + ", The user <@" + message.author.id + "> requested a **" + requestType + "** mentor!").then(function (sm) { sm.react("✅"); openRequests[sm.id] = message; });
-                                    message.reply("Sent your request!");
+                                    message.member.send("Sent your request!");
                                 }
                             });
                         }
@@ -115,7 +115,7 @@ client.on("messageReactionAdd", async (msg) => {
             msg.message.clearReactions();
 
             openRequests[msg.message.id].react("✅");
-            openRequests[msg.message.id].reply("Your request was accepted!");
+            openRequests[msg.message.id].member.send("Your request was accepted!");
 
             var mentorMember = msg.message.guild.member(men);
 
