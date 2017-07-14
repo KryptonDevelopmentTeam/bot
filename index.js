@@ -6,6 +6,7 @@ global.appRoot = path.resolve(__dirname);
 
 prefix = "";
 
+var guild;
 var openRequests = {};
 var runningSession = new Array();
 
@@ -30,20 +31,48 @@ function sleep(milliseconds) {
 
 class Session
 {
-    constructor(_mentor, _student) {
-        this.student = _student;
-        this.mentor = _mentor;
-        this.sessionID = ("Session-" + getSessionID()).toLowerCase();
+    constructor(_mentor, _student, _sessionID) {
+        if (_sessionID === undefined) {
+            this.student = _student;
+            this.mentor = _mentor;
+            this.sessionID = ("Session-" + getSessionID()).toLowerCase();
 
-        _mentor.guild.createChannel(this.sessionID, "text").then(function (channel) { channel.overwritePermissions(_mentor.guild.id, { SEND_MESSAGES: false, READ_MESSAGES: false }); channel.overwritePermissions(_mentor, { SEND_MESSAGES: true, READ_MESSAGES: true }); channel.overwritePermissions(_student, { SEND_MESSAGES: true, READ_MESSAGES: true }); channel.send("Use the command `" + prefix + "endsession` when you are finished!"); });
+            var str = this.student.id + " " + this.mentor.id;
+            fs.writeFile(appRoot + "/sessions/" + this.sessionID + ".txt", str, { flag: 'wx' }, function (err) { });
+
+            _mentor.guild.createChannel(this.sessionID, "text").then(function (channel) { channel.overwritePermissions(_mentor.guild.id, { SEND_MESSAGES: false, READ_MESSAGES: false }); channel.overwritePermissions(_mentor, { SEND_MESSAGES: true, READ_MESSAGES: true }); channel.overwritePermissions(_student, { SEND_MESSAGES: true, READ_MESSAGES: true }); channel.send("Use the command `" + prefix + "endsession` when you are finished!"); });
+        } else {
+            this.sessionID = _sessionID;
+
+            var fname = _sessionID + ".txt";
+
+            var filec = fs.readFileSync(appRoot + '/sessions/' + fname, 'utf8');
+            var lines = filec.split("\r\n");
+
+            lines.forEach(function (line) {
+                var parts = line.split(" ");
+                var stuID = parts[0];
+                var menID = parts[1];
+
+                guild.members.forEach(function (us) {
+                    if (us.id === stuID) {
+                        this.student = us;
+                    } else if (us.id === menID) {
+                        this.mentor = us;
+                    }
+                }.bind(this));
+            }.bind(this));
+        }
     }
 
     endSession() {
-        this.mentor.guild.channels.forEach(function (c) {
+        guild.channels.forEach(function (c) {
             if (c.name === this.sessionID) {
                 c.delete();
             }
         }.bind(this));
+
+        fs.unlink(appRoot + '/sessions/' + this.sessionID + ".txt", () => { })
     }
 }
 
@@ -130,6 +159,14 @@ client.on("messageReactionAdd", async (msg) => {
 client.on("ready", async () => {
     var filec = fs.readFileSync(appRoot + '/prefix.txt', 'utf8');
     var lines = filec.split("\r\n");
+
+    client.guilds.forEach(async (g) => {
+        guild = g;
+    });
+
+    fs.readdirSync(appRoot + "/sessions/").forEach(file => {
+        runningSession.push(new Session("", "", file.substring(0, file.length - 4)));
+    });
 
     prefix = lines[0];
 });
