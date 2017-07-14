@@ -75,10 +75,17 @@ client.on('message', async (message) => {
             }
         } else if (command === "requestmentor") {
             if (params.length > 0) {
-                if (availableLangs.includes(params[0].toLowerCase())) {
+                var requestType = "";
+                for (i = 0; i < params.length; i++) {
+                    requestType += params[i] + " ";
+                }
+                requestType = requestType.substring(0, requestType.length - 1);
+                requestType.toLowerCase();
+
+                if (availableLangs.includes(requestType) || availableTopics.includes(requestType)) {
                     message.guild.channels.forEach(function (channel) {
                         if (channel.name === "mentors") {
-                            channel.send("The user " + message.author.username + " requested a **" + params[0] + "** mentor!").then(function (sm) { sm.react("✅"); openRequests[sm.id] = message; });
+                            channel.send("The user " + message.author.username + " requested a **" + requestType + "** mentor!").then(function (sm) { sm.react("✅"); openRequests[sm.id] = message; });
                         }
                     });
                 }
@@ -90,12 +97,12 @@ client.on('message', async (message) => {
                 }
             });
         } else if (command === "addlang") {
-            var allowed = false;
+            var allowed = true;
 
             if (allowed || message.member.hasPermission("ADMINISTRATOR")) {
                 if (params.length > 0) {
                     if (!availableLangs.includes(params[0].toLowerCase())) {
-                        availableLangs.push(params[0]);
+                        availableLangs.push(params[0].toLowerCase());
 
                         var filec = fs.readFileSync(appRoot + '/languages.txt', 'utf8');
                         var lines = filec.split("\r\n");
@@ -124,6 +131,40 @@ client.on('message', async (message) => {
             str += "`";
 
             message.reply(str);
+        } else if (command === "addtopic") {
+            var allowed = true;
+
+            if (allowed || message.member.hasPermission("ADMINISTRATOR")) {
+                if (params.length > 0) {
+                    var topic = "";
+                    for (i = 0; i < params.length; i++) {
+                        topic += params[i] + " ";
+                    }
+                    topic = topic.substring(0, topic.length - 1);
+                    topic.toLowerCase();
+
+                    if (!availableTopics.includes(topic)) {
+                        availableTopics.push(topic);
+
+                        var filec = fs.readFileSync(appRoot + '/topics.txt', 'utf8');
+                        var lines = filec.split("\r\n");
+
+                        var fileparts = new Array();
+                        for (i = 0; i < lines.length; i++) {
+                            var p = lines[i].toString().toLowerCase().split(" ");
+                            fileparts.push(p);
+                        }
+
+                        var str = "";
+                        for (i = 0; i < availableTopics.length; i++) {
+                            str += availableTopics[i] + "\r\n";
+                        }
+                        fs.writeFile(appRoot + '/topics.txt', str, function (err) {
+
+                        });
+                    }
+                }
+            }
         }
     }
 });
@@ -163,6 +204,13 @@ client.on("ready", async () => {
 
     for (i = 0; i < lines.length; i++) {
         availableLangs.push(lines[i]);
+    }
+
+    filec = fs.readFileSync(appRoot + '/topics.txt', 'utf8');
+    lines = filec.split("\r\n");
+
+    for (i = 0; i < lines.length; i++) {
+        availableTopics.push(lines[i]);
     }
 });
 
