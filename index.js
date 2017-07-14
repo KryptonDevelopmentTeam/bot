@@ -7,8 +7,6 @@ global.appRoot = path.resolve(__dirname);
 prefix = "";
 
 var openRequests = {};
-var availableLangs = new Array();
-var availableTopics = new Array();
 var runningSession = new Array();
 
 function getSessionID() {
@@ -80,15 +78,19 @@ client.on('message', async (message) => {
                     requestType += params[i] + " ";
                 }
                 requestType = requestType.substring(0, requestType.length - 1);
-                requestType.toLowerCase();
 
-                if (availableLangs.includes(requestType) || availableTopics.includes(requestType)) {
-                    message.guild.channels.forEach(function (channel) {
-                        if (channel.name === "mentors") {
-                            channel.send("The user " + message.author.username + " requested a **" + requestType + "** mentor!").then(function (sm) { sm.react("✅"); openRequests[sm.id] = message; });
+                message.guild.roles.forEach(function (rol) {
+                    if (rol.name.length > 6) {
+                        if (rol.name.substring(0, rol.name.length - 7).toLowerCase() === requestType.toLowerCase()) {
+                            message.guild.channels.forEach(function (channel) {
+                                if (channel.name === "mentors") {
+                                    channel.send("<@&" + rol.id + ">" + ", The user <@" + message.author.id + "> requested a **" + requestType + "** mentor!").then(function (sm) { sm.react("✅"); openRequests[sm.id] = message; });
+                                    message.reply("Sent your request!");
+                                }
+                            });
                         }
-                    });
-                }
+                    }
+                });
             }
         } else if (command === "endsession") {
             runningSession.forEach(function (s) {
@@ -96,75 +98,6 @@ client.on('message', async (message) => {
                     s.endSession();
                 }
             });
-        } else if (command === "addlang") {
-            var allowed = true;
-
-            if (allowed || message.member.hasPermission("ADMINISTRATOR")) {
-                if (params.length > 0) {
-                    if (!availableLangs.includes(params[0].toLowerCase())) {
-                        availableLangs.push(params[0].toLowerCase());
-
-                        var filec = fs.readFileSync(appRoot + '/languages.txt', 'utf8');
-                        var lines = filec.split("\r\n");
-
-                        var fileparts = new Array();
-                        for (i = 0; i < lines.length; i++) {
-                            var p = lines[i].toString().toLowerCase().split(" ");
-                            fileparts.push(p);
-                        }
-
-                        var str = "";
-                        for (i = 0; i < availableLangs.length; i++) {
-                            str += availableLangs[i] + "\r\n";
-                        }
-                        fs.writeFile(appRoot + '/languages.txt', str, function (err) {
-
-                        });
-                    }
-                }
-            }
-        } else if (command === "listlangs") {
-            var str = "The languages the bot knows of are:\n`";
-            availableLangs.forEach(function (lang) {
-                str += lang + "\n";
-            });
-            str += "`";
-
-            message.reply(str);
-        } else if (command === "addtopic") {
-            var allowed = true;
-
-            if (allowed || message.member.hasPermission("ADMINISTRATOR")) {
-                if (params.length > 0) {
-                    var topic = "";
-                    for (i = 0; i < params.length; i++) {
-                        topic += params[i] + " ";
-                    }
-                    topic = topic.substring(0, topic.length - 1);
-                    topic.toLowerCase();
-
-                    if (!availableTopics.includes(topic)) {
-                        availableTopics.push(topic);
-
-                        var filec = fs.readFileSync(appRoot + '/topics.txt', 'utf8');
-                        var lines = filec.split("\r\n");
-
-                        var fileparts = new Array();
-                        for (i = 0; i < lines.length; i++) {
-                            var p = lines[i].toString().toLowerCase().split(" ");
-                            fileparts.push(p);
-                        }
-
-                        var str = "";
-                        for (i = 0; i < availableTopics.length; i++) {
-                            str += availableTopics[i] + "\r\n";
-                        }
-                        fs.writeFile(appRoot + '/topics.txt', str, function (err) {
-
-                        });
-                    }
-                }
-            }
         }
     }
 });
@@ -182,6 +115,7 @@ client.on("messageReactionAdd", async (msg) => {
             msg.message.clearReactions();
 
             openRequests[msg.message.id].react("✅");
+            openRequests[msg.message.id].reply("Your request was accepted!");
 
             var mentorMember = msg.message.guild.member(men);
 
@@ -198,20 +132,6 @@ client.on("ready", async () => {
     var lines = filec.split("\r\n");
 
     prefix = lines[0];
-
-    filec = fs.readFileSync(appRoot + '/languages.txt', 'utf8');
-    lines = filec.split("\r\n");
-
-    for (i = 0; i < lines.length; i++) {
-        availableLangs.push(lines[i]);
-    }
-
-    filec = fs.readFileSync(appRoot + '/topics.txt', 'utf8');
-    lines = filec.split("\r\n");
-
-    for (i = 0; i < lines.length; i++) {
-        availableTopics.push(lines[i]);
-    }
 });
 
 client.login(process.argv[2]);
