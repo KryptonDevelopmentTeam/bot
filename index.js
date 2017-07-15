@@ -95,6 +95,7 @@ client.on('message', async (message) => {
                     var everyoneRole = message.guild.roles.find('name', '@everyone')
 
                     message.channel.send(everyoneRole.toString() + ", This server now uses the prefix \"***" + params[0] + "***\" for commands!");
+                    client.user.setGame(prefix + "help");
                 }
                 else {
                     message.reply("This command can't be called without a parameter!");
@@ -127,6 +128,12 @@ client.on('message', async (message) => {
                     s.endSession();
                 }
             });
+        } else if (command === "help") {
+            var msg = "KDT-Bot is a Discord bot developed by <@138988491240505345> for the Krypton Development Team.\n\n";
+            msg += "**help:**: Sends you this message.\n\n";
+            msg += "**requestmentor**: Must be called with a parameter. Request help for the specified topic.\n\n";
+            msg += "**setprefix**: Must be called by Administrators and needs a parameter. Sets the global prefix of the bot."
+            message.member.send(msg);
         }
     }
 });
@@ -169,6 +176,7 @@ client.on("ready", async () => {
     });
 
     prefix = lines[0];
+    client.user.setGame(prefix + "help");
 });
 
 client.login(process.argv[2]);
