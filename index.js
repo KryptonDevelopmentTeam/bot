@@ -7,6 +7,7 @@ global.appRoot = path.resolve(__dirname);
 prefix = "";
 
 var guild;
+var topicAliases = {};
 var openRequests = {};
 var runningSession = new Array();
 
@@ -76,12 +77,53 @@ class Session
     }
 }
 
+function getParams(_str) {
+    var inBrackets = false;
+    var rightAfterBrackets = false;
+
+    var currentParam = "";
+
+    var params = new Array();
+
+    for (i = 0; i < _str.length; i++) {
+        if (_str[i] === "[" && !inBrackets) {
+            inBrackets = true;
+            continue;
+        } else if (_str[i] === "]" && inBrackets) {
+            inBrackets = false;
+            params.push(currentParam);
+            currentParam = "";
+            rightAfterBrackets = true;
+            continue;
+        }
+
+        if (rightAfterBrackets && !inBrackets) {
+            if (_str[i] === " " || _str[i] === "[") {
+                rightAfterBrackets = false;
+                continue;
+            }
+        } else if (!rightAfterBrackets && !inBrackets) {
+            if (_str[i] === " ") {
+                params.push(currentParam);
+                currentParam = "";
+                continue;
+            }
+        }
+
+        currentParam += _str[i];
+    }
+
+    params.push(currentParam);
+
+    return params;
+}
+
 client.on('message', async (message) => {
     if (message.toString().toLowerCase().substring(0, 1) === prefix) {
-        var parts = message.toString().replace(/(\r\n|\n|\r)/gm, "").split(" ");
+        var command = message.toString().substr(prefix.length, message.toString().indexOf(' ') - 1);
+        if (command === "") command = message.toString().substr(prefix.length);
 
-        var command = parts[0].substring(prefix.length, parts[0].length);
-        var params = parts.slice(1, parts.length);
+        var params = getParams(message.toString().substr(command.length + 2, message.toString().length));
 
         if (command === "setprefix") {
             if (message.member.hasPermission("ADMINISTRATOR")) {
@@ -109,12 +151,19 @@ client.on('message', async (message) => {
                 }
                 requestType = requestType.substring(0, requestType.length - 1);
 
+                for (var key in topicAliases) {
+                    if (!topicAliases.hasOwnProperty(key)) continue;
+                    if (key === params[0]) {
+                        requestType = topicAliases[key];
+                    }
+                }
+
                 message.guild.roles.forEach(function (rol) {
                     if (rol.name.length > 6) {
                         if (rol.name.substring(0, rol.name.length - 7).toLowerCase() === requestType.toLowerCase()) {
                             message.guild.channels.forEach(function (channel) {
                                 if (channel.name === "mentors") {
-                                    channel.send("<@&" + rol.id + ">" + ", The user <@" + message.author.id + "> requested a **" + requestType + "** mentor!").then(function (sm) { sm.react("✅"); openRequests[sm.id] = message; });
+                                    channel.send("<@&" + rol.id + ">" + ", The user <@" + message.author.id + "> requested a **" + requestType + "** mentor! Click the ***white check mark*** to accept the request.").then(function (sm) { sm.react("✅"); openRequests[sm.id] = message; });
                                     message.member.send("Sent your request!");
                                 }
                             });
@@ -128,11 +177,27 @@ client.on('message', async (message) => {
                     s.endSession();
                 }
             });
+        } else if (command === "topicalias") {
+            if (params.length > 1) {
+                topicAliases[params[1]] = params[0];
+
+                var str = "";
+
+                for (var key in topicAliases) {
+                    if (!topicAliases.hasOwnProperty(key)) continue;
+                    str += "[" + key + "] [" + topicAliases[key] + "]\n";
+                }
+
+                fs.writeFile(appRoot + '/topic_aliases.txt', str, function (err) {
+
+                })
+            }
         } else if (command === "help") {
             var msg = "KDT-Bot is a Discord bot developed by <@138988491240505345> for the Krypton Development Team.\n\n";
             msg += "**help**: Sends you this message.\n\n";
             msg += "**requestmentor**: Must be called with a parameter. Request help for the specified topic.\n\n";
-            msg += "**setprefix**: Must be called by Administrators and needs a parameter. Sets the global prefix of the bot."
+            msg += "**setprefix**: Administrators only and needs a parameter. Sets the global prefix of the bot."
+            msg += "**";
             message.member.send(msg);
         }
     }
@@ -181,6 +246,21 @@ client.on("ready", async () => {
 
     prefix = lines[0];
     client.user.setGame(prefix + "help");
+
+    filec = fs.readFileSync(appRoot + '/topic_aliases.txt', 'utf8');
+    lines = filec.split("\r\n");
+
+    lines.forEach((l) => {
+        var parts = getParams(l);
+        var alias = parts[0];
+        var lang = parts[1];
+        alias = alias.split('[').join('');
+        alias = alias.split(']').join('');
+        lang = lang.split('[').join('');
+        lang = lang.split(']').join('');
+
+        topicAliases[alias] = lang;
+    });
 });
 
 client.login(process.argv[2]);
