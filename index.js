@@ -130,7 +130,7 @@ client.on('message', async (message) => {
             });
         } else if (command === "help") {
             var msg = "KDT-Bot is a Discord bot developed by <@138988491240505345> for the Krypton Development Team.\n\n";
-            msg += "**help:**: Sends you this message.\n\n";
+            msg += "**help**: Sends you this message.\n\n";
             msg += "**requestmentor**: Must be called with a parameter. Request help for the specified topic.\n\n";
             msg += "**setprefix**: Must be called by Administrators and needs a parameter. Sets the global prefix of the bot."
             message.member.send(msg);
@@ -161,6 +161,10 @@ client.on("messageReactionAdd", async (msg) => {
             openRequests[msg.message.id] = undefined;
         }
     }
+});
+
+client.on("guildMemberAdd", async (user) => {
+    user.guild.defaultChannel.send("Welcome, <@" + user.id + ">!\n\n" + `Use ***${prefix}help*** to get a list of commands\nor ***${prefix}requestmentor*** to *request help for a topic.*`);
 });
 
 client.on("ready", async () => {
