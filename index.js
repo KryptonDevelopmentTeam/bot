@@ -197,7 +197,7 @@ client.on('message', async (message) => {
             msg += "**help**: Sends you this message.\n\n";
             msg += "**requestmentor**: Must be called with a parameter. Request help for the specified topic.\n\n";
             msg += "**setprefix**: Administrators only and needs a parameter. Sets the global prefix of the bot."
-            msg += "**";
+            //msg += "**";
             message.member.send(msg);
         }
     }
@@ -211,6 +211,28 @@ client.on("messageReactionAdd", async (msg) => {
             for (var [key, value] of msg.users) {
                 men = value;
             }
+
+            this.currentID = men.id;
+
+            msg.message.guild.members.forEach(function (m) {
+                if (m.id === this.currentID) {
+                    console.log("FOUND THE USER");
+                    this.member = m;
+                }
+            }.bind(this));
+
+            this.allowed = false;
+
+            this.member.roles.forEach(function (rol) {
+                if (rol.id === msg.message.toString().substr(3, msg.message.toString().indexOf(">") - 3)) {
+                    this.allowed = true;
+                }
+            }.bind(this));
+
+            if (!this.allowed)
+                return;
+
+            this.allowed = false;
 
             msg.message.edit("~~" + msg.message.content + "~~" + "   accepted by " + men);
             msg.message.clearReactions();
