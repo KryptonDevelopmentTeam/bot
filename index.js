@@ -206,17 +206,12 @@ client.on('message', async (message) => {
 client.on("messageReactionAdd", async (msg) => {
     if (openRequests[msg.message.id] !== undefined) {
         if (msg.users.size > 1) {
-            var men;
-
-            for (var [key, value] of msg.users) {
-                men = value;
-            }
+            var men = msg.users.last();
 
             this.currentID = men.id;
 
             msg.message.guild.members.forEach(function (m) {
                 if (m.id === this.currentID) {
-                    console.log("FOUND THE USER");
                     this.member = m;
                 }
             }.bind(this));
@@ -224,7 +219,9 @@ client.on("messageReactionAdd", async (msg) => {
             this.allowed = false;
 
             this.member.roles.forEach(function (rol) {
-                if (rol.id === msg.message.toString().substr(3, msg.message.toString().indexOf(">") - 3)) {
+                if (rol.id === msg.message.toString().substr(3, msg.message.toString().indexOf(">") - 3) && this.currentID !== openRequests[msg.message.id].member.id) {
+                    console.log(msg.message.member.id + " " + openRequests[msg.message.id].member.id);
+
                     this.allowed = true;
                 }
             }.bind(this));
