@@ -8,7 +8,6 @@ prefix = "";
 
 var guild;
 var topicAliases = {};
-var openRequests = {};
 var runningSession = new Array();
 
 function getSessionID() {
@@ -152,8 +151,7 @@ client.on('message', async (message) => {
                 requestType = requestType.substring(0, requestType.length - 1);
 
                 for (var key in topicAliases) {
-                    if (!topicAliases.hasOwnProperty(key)) continue;
-                    if (key === params[0]) {
+                    if (key === requestType) {
                         requestType = topicAliases[key];
                     }
                 }
@@ -163,7 +161,7 @@ client.on('message', async (message) => {
                         if (rol.name.substring(0, rol.name.length - 7).toLowerCase() === requestType.toLowerCase()) {
                             message.guild.channels.forEach(function (channel) {
                                 if (channel.name === "mentors") {
-                                    channel.send("<@&" + rol.id + ">" + ", The user <@" + message.author.id + "> requested a **" + requestType + "** mentor! Click the ***white check mark*** to accept the request.").then(function (sm) { sm.react("✅"); openRequests[sm.id] = message; });
+                                    channel.send("<@&" + rol.id + ">" + ", The user <@" + message.author.id + "> requested a **" + requestType + "** mentor! Click the ***white check mark*** to accept the request.").then(function (sm) { sm.react("✅"); });
                                     message.member.send("Sent your request!");
                                 }
                             });
@@ -185,8 +183,10 @@ client.on('message', async (message) => {
 
                 for (var key in topicAliases) {
                     if (!topicAliases.hasOwnProperty(key)) continue;
-                    str += "[" + key + "] [" + topicAliases[key] + "]\n";
+                    str += "[" + key + "] [" + topicAliases[key] + "]\r\n";
                 }
+
+                str = str.substr(0, str.length - 2);
 
                 fs.writeFile(appRoot + '/topic_aliases.txt', str, function (err) {
 
@@ -204,45 +204,45 @@ client.on('message', async (message) => {
 });
 
 client.on("messageReactionAdd", async (msg) => {
-    if (openRequests[msg.message.id] !== undefined) {
-        if (msg.users.size > 1) {
-            var men = msg.users.last();
+    if (msg.message.member.id = client.user.id) {
+        this.reqID = msg.message.toString().substring(msg.message.toString().lastIndexOf("<") + 2, msg.message.toString().lastIndexOf(">"));
+        if (/^\d+$/.test(this.reqID)) {
+            if (msg.users.size > 1) {
+                var men = msg.users.last();
 
-            this.currentID = men.id;
+                this.currentID = men.id;
 
-            msg.message.guild.members.forEach(function (m) {
-                if (m.id === this.currentID) {
-                    this.member = m;
-                }
-            }.bind(this));
+                msg.message.guild.members.forEach(function (m) {
+                    if (m.id === this.currentID) {
+                        this.member = m;
+                    } else if (m.id === this.reqID) {
+                        this.requestor = m;
+                    }
+                }.bind(this));
 
-            this.allowed = false;
+                this.allowed = false;
 
-            this.member.roles.forEach(function (rol) {
-                if (rol.id === msg.message.toString().substr(3, msg.message.toString().indexOf(">") - 3) && this.currentID !== openRequests[msg.message.id].member.id) {
-                    console.log(msg.message.member.id + " " + openRequests[msg.message.id].member.id);
+                this.member.roles.forEach(function (rol) {
+                    if (rol.id === msg.message.toString().substr(3, msg.message.toString().indexOf(">") - 3) && this.currentID !== this.reqID) {
+                        this.allowed = true;
+                    }
+                }.bind(this));
 
-                    this.allowed = true;
-                }
-            }.bind(this));
+                if (!this.allowed)
+                    return;
 
-            if (!this.allowed)
-                return;
+                this.allowed = false;
 
-            this.allowed = false;
+                msg.message.edit("~~" + msg.message.content + "~~" + "   accepted by " + men);
+                msg.message.clearReactions();
 
-            msg.message.edit("~~" + msg.message.content + "~~" + "   accepted by " + men);
-            msg.message.clearReactions();
+                this.requestor.send("Your request was accepted!");
 
-            openRequests[msg.message.id].react("✅");
-            openRequests[msg.message.id].member.send("Your request was accepted!");
+                var mentorMember = msg.message.guild.member(men);
 
-            var mentorMember = msg.message.guild.member(men);
-
-            var session = new Session(mentorMember, openRequests[msg.message.id].member);
-            runningSession.push(session);
-
-            openRequests[msg.message.id] = undefined;
+                var session = new Session(mentorMember, this.requestor);
+                runningSession.push(session);
+            }
         }
     }
 });
@@ -273,6 +273,7 @@ client.on("ready", async () => {
         var parts = getParams(l);
         var alias = parts[0];
         var lang = parts[1];
+
         alias = alias.split('[').join('');
         alias = alias.split(']').join('');
         lang = lang.split('[').join('');
