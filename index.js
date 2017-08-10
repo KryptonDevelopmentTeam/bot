@@ -1,16 +1,17 @@
-var Discord = require('discord.js');
-var client = new Discord.Client();
-var fs = require('fs');
+const Discord = require("discord.js");
+const client = new Discord.Client();
+
 var path = require('path');
+var fs = require('fs');
+var mkdirp = require('mkdirp');
+
 global.appRoot = path.resolve(__dirname);
+var servers = {};
+var groupCommands = {};
+var grouplessCommands = {};
+var runningSessions = new Array();
 
-prefix = "";
-
-var guild;
-var topicAliases = {};
-var runningSession = new Array();
-
-function getSessionID() {
+function generateSessionID() {
     var text = "";
     var possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
@@ -20,267 +21,507 @@ function getSessionID() {
     return text;
 }
 
-function sleep(milliseconds) {
-    var start = new Date().getTime();
-    for (var i = 0; i < 1e7; i++) {
-        if ((new Date().getTime() - start) > milliseconds) {
-            break;
+
+class Server {
+    constructor(_guildObj) {
+        this.guildObj = _guildObj;
+
+        this.id = _guildObj.id;
+        this.name = _guildObj.name;
+        this.prefix = "&";
+        this.mentorDict = {};
+
+        fs.stat(appRoot + "/serverconfig/" + this.id.toString() + ".txt", function (err, stat) {
+            if (err == null) {
+                fs.readFile(appRoot + "/serverconfig/" + this.id.toString() + ".txt", 'utf8', function (_err, data) {
+                    if (_err)
+                        console.log("Server load error! ", _err.code);
+                    else {
+                        var fileParts = data.split("\r\n");
+                        this.prefix = fileParts[0];
+                    }
+                }.bind(this));
+            }
+            else if (err.code == 'ENOENT') {
+                mkdirp(`${appRoot}/serverconfig/${this.id.toString()}/`);
+                fs.writeFile(appRoot + "/serverconfig/" + this.id.toString() + "/config.txt", "&\r\n", (err_) => { if (err_) console.log("Server write error! ", err_.code); });
+            }
+            else {
+                console.log("Server save error! ", err.code);
+            }
+        }.bind(this));
+
+        fs.readdir(`${appRoot}/serverconfig/${this.id.toString()}/mentors/`, (err, storedTopics) => {
+            if (storedTopics !== undefined) {
+                storedTopics.forEach(file => {
+                    fs.readFile(`${appRoot}/serverconfig/${this.id.toString()}/mentors/${file}`, 'utf8', (_err, data) => {
+                        var lines = data.split("\r\n");
+                        lines.forEach((line) => {
+                            var str = line.match(/([^\n\r\t ])/g);
+                            if (str != null)
+                            {
+                                this.addMemberToMentorTopic(line, file.substring(0, file.length - 4));
+                            }
+                        });
+                    });
+                });
+            }
+        });
+    }
+
+    addMemberToMentorTopic(_memberID, _topicName, _msg)
+    {
+        if (!this.mentorDict[_topicName.toLowerCase()])
+            this.mentorDict[_topicName.toLowerCase()] = { mentorIDs: [] };
+
+        if (this.mentorDict[_topicName.toLowerCase()].mentorIDs.indexOf(_memberID) != -1) {
+            if (_msg != undefined)
+                send(_msg, "Already mentor", `The user <@${_memberID}> already is a ${_topicName} mentor!`)
+            return;
+        }
+        else {
+            this.mentorDict[_topicName.toLowerCase()].mentorIDs.push(_memberID.toString());
+            if (_msg != undefined)
+                send(_msg, `Added mentor`, `Added the user <@${_memberID}> to the ${_topicName} mentors!`);
+        }
+
+        var toWrite = "";
+        this.mentorDict[_topicName.toLowerCase()].mentorIDs.forEach(function (_id) {
+            toWrite += _id + "\r\n";
+        });
+
+        mkdirp(`${appRoot}/serverconfig/${this.id.toString()}/mentors/`);
+        fs.writeFile(`${appRoot}/serverconfig/${this.id.toString()}/mentors/${_topicName}.txt`, toWrite, (err) => { if (err) console.log("Mentor write error! ", err.code); });
+    }
+
+    removeMemberFromMentorTopic(_memberID, _topicName, _msg)
+    {
+        if (!this.mentorDict[_topicName.toLowerCase()]) {
+            send(_msg, "Empty topic", `The topic ${_topicName} does not contain any mentors!`);
+            return;
+        }
+
+        var index = this.mentorDict[_topicName.toLowerCase()].mentorIDs.indexOf(_memberID);
+        if (index != -1)
+        {
+            this.mentorDict[_topicName.toLowerCase()].mentorIDs.splice(index, 1);
+
+            send(_msg, "Removed mentor", `Removed the user <@${_memberID}> from the ${_topicName} mentors!`);
+
+            var toWrite = "";
+            this.mentorDict[_topicName.toLowerCase()].mentorIDs.forEach(function (_id) {
+                toWrite += _id + "\r\n";
+            });
+
+            if (toWrite.length < 15)
+            {
+                delete this.mentorDict[_topicName.toLowerCase()];
+                fs.unlink(`${appRoot}/serverconfig/${this.id.toString()}/mentors/${_topicName}.txt`, (err) => { if (err) console.log("Mentor deletion error! ", err.code); });
+            }
+            else
+            {
+                fs.writeFile(`${appRoot}/serverconfig/${this.id.toString()}/mentors/${_topicName}.txt`, toWrite, (err) => { if (err) console.log("Mentor write error! ", err.code); });
+            }
+        }
+        else
+        {
+            send(_msg, "Not part of mentors", `The user you provided is not part of the ${_topicName} mentors!`)
+        }
+
+    }
+}
+
+class Command {
+    constructor(_group, _command, _minParams, _function) {
+        this.group = _group;
+        this.command = _command;
+        this.minParams = _minParams;
+        this.func = _function;
+
+        if (this.group !== undefined && this.group !== "") {
+            if (!groupCommands[this.group])
+                groupCommands[this.group] = { commands: {} };
+
+            groupCommands[this.group].commands[this.command] = this;
+        }
+        else {
+            this.group = "";
+            grouplessCommands[this.command] = this;
+        }
+    }
+
+    execute(_msg, _params) {
+        if (_params !== undefined) {
+            if (_params.length >= this.minParams)
+                this.func(_msg, _params);
+            else
+                send(_msg, "Not enough arguments", `The command **${this.command}**${this.group !== "" ? " in the group " + this.group : ""} can only be executed with ${this.minParams} or more arguments!`);
+        } else {
+            if (this.minParams === 0)
+                this.func(_msg, _params);
+            else
+                send(_msg, "Not enough arguments", `The command **${this.command}**${this.group !== "" ? " in the group " + this.group : ""} can only be executed with ${this.minParams} or more arguments!`);
         }
     }
 }
 
-class Session
-{
-    constructor(_mentor, _student, _sessionID) {
+class Session {
+    constructor(_mentor, _student, _sessionID, _serverID) {
         if (_sessionID === undefined) {
-            this.student = _student;
             this.mentor = _mentor;
-            this.sessionID = ("Session-" + getSessionID()).toLowerCase();
+            this.sessionID = ("Session-" + generateSessionID()).toLowerCase();
+            this.server = _mentor.guild;
 
-            var str = this.student.id + " " + this.mentor.id;
-            fs.writeFile(appRoot + "/sessions/" + this.sessionID + ".txt", str, { flag: 'wx' }, function (err) { });
+            mkdirp(`${appRoot}/serverconfig/${this.server.id.toString()}/sessions/`);
+            fs.writeFile(appRoot + "/serverconfig/" + _mentor.guild.id + "/sessions/" + this.sessionID + ".txt", this.mentor.id, { flag: 'wx' }, function (err) { });
 
-            _mentor.guild.createChannel(this.sessionID, "text").then(function (channel) { channel.overwritePermissions(_mentor.guild.id, { SEND_MESSAGES: false, READ_MESSAGES: false }); channel.overwritePermissions(_mentor, { SEND_MESSAGES: true, READ_MESSAGES: true }); channel.overwritePermissions(_student, { SEND_MESSAGES: true, READ_MESSAGES: true }); channel.send("Use the command `" + prefix + "endsession` when you are finished!"); });
+            _mentor.guild.createChannel(this.sessionID, "text").then(function (channel)
+            {
+                channel.overwritePermissions(_mentor.guild.id, { SEND_MESSAGES: false, READ_MESSAGES: false });
+                channel.overwritePermissions(_mentor, { SEND_MESSAGES: true, READ_MESSAGES: true });
+                channel.overwritePermissions(_student, { SEND_MESSAGES: true, READ_MESSAGES: true });
+                channel.send("Use the command `" + servers[channel.guild.id].prefix + "endsession` to end this session!");
+            }.bind(this));
         } else {
             this.sessionID = _sessionID;
+            this.server = client.guilds.get(_serverID);
 
             var fname = _sessionID + ".txt";
 
-            var filec = fs.readFileSync(appRoot + '/sessions/' + fname, 'utf8');
+            var filec = fs.readFileSync(appRoot + '/serverconfig/' + _serverID + '/sessions/' + fname, 'utf8');
             var lines = filec.split("\r\n");
 
             lines.forEach(function (line) {
                 var parts = line.split(" ");
-                var stuID = parts[0];
-                var menID = parts[1];
+                var menID = parts[0];
 
-                guild.members.forEach(function (us) {
-                    if (us.id === stuID) {
-                        this.student = us;
-                    } else if (us.id === menID) {
-                        this.mentor = us;
-                    }
-                }.bind(this));
+                this.mentor = client.guilds.get(_serverID).members.get(menID);
             }.bind(this));
         }
     }
 
     endSession() {
-        guild.channels.forEach(function (c) {
+        fs.unlink(appRoot + '/serverconfig/' + this.serverID + '/sessions/' + this.sessionID + ".txt", () => { })
+    }
+
+    sendMessage(_str) {
+        this.server.channels.forEach(function (c) {
             if (c.name === this.sessionID) {
-                c.delete();
+                c.send(_str);
             }
         }.bind(this));
+    }
 
-        fs.unlink(appRoot + '/sessions/' + this.sessionID + ".txt", () => { })
+    addMember(_member) {
+        this.server.channels.forEach(function (c) {
+            if (c.name === this.sessionID) {
+                c.overwritePermissions(_member, { SEND_MESSAGES: true, READ_MESSAGES: true });
+            }
+        }.bind(this));
     }
 }
 
-function getParams(_str) {
+
+async function MentorAddCommand(_msg, _params)
+{
+    var execute = true;
+
+    _msg.member.roles.forEach(function (role, key) {
+        if (role.name === "Administrator" || role.name === "Head Administrator" || role.name === "Global Director" || role.name === "Moderator" || role.name === "Staff") {
+            if (execute) {
+                execute = false;
+
+                var topic = _params[0];
+                var userID = _params[1];
+
+                if (/(<@[0-9]{18}>)|(<@![0-9]{18}>)/g.test(userID)) {
+                    userID = userID.replace(/[<@!>]/g, "");
+
+                    if (!_msg.guild.members.get(userID)) {
+                        send(_msg, "Invalid user", "The user you provided is not valid!");
+                        return;
+                    }
+
+                    servers[_msg.guild.id].addMemberToMentorTopic(userID, topic, _msg);
+                }
+                else {
+                    send(_msg, "Invalid user", "You have to mention a user!");
+                    return;
+                }
+            }
+        }
+    }.bind(execute));
+}
+
+async function MentorRemoveCommand(_msg, _params)
+{
+    var execute = true;
+
+    _msg.member.roles.forEach(function (role, key) {
+        if (role.name === "Administrator" || role.name === "Head Administrator" || role.name === "Global Director" || role.name === "Moderator" || role.name === "Staff") {
+            if (execute) {
+                execute = false;
+                var topic = _params[0];
+                var userID = _params[1];
+
+                if (/(<@[0-9]{18}>)|(<@![0-9]{18}>)/g.test(userID)) {
+                    userID = userID.replace(/[<@!>]/g, "");
+
+                    if (!_msg.guild.members.get(userID)) {
+                        send(_msg, "Invalid user", "The user you provided is not valid!");
+                        return;
+                    }
+
+                    servers[_msg.guild.id].removeMemberFromMentorTopic(userID, topic, _msg);
+                }
+                else {
+                    send(_msg, "Invalid user", "You have to mention a user!");
+                    return;
+                }
+            }
+        }
+    }.bind(execute));
+}
+
+async function MentorListCommand(_msg, _params)
+{
+    var msgs = new Array();
+
+    var fullMessage = "";
+    var pushAgain = false;
+
+    for (var key in servers[_msg.guild.id].mentorDict)
+    {
+        if (key in servers[_msg.guild.id].mentorDict) {
+            fullMessage += "**" + key + "**\n";
+
+            for (var i = 0; i < servers[_msg.guild.id].mentorDict[key].mentorIDs.length; i++) {
+                fullMessage += "\t" + _msg.guild.members.get(servers[_msg.guild.id].mentorDict[key].mentorIDs[i]).user.username + "\n";
+            }
+
+            pushAgain = true;
+
+            if (fullMessage.length + 500 > 2000) {
+                msgs.push(fullMessage);
+                fullMessage = "";
+                pushAgain = false;
+            }
+
+            fullMessage += "\n";
+        }
+    }
+
+    if (pushAgain)
+        msgs.push(fullMessage);
+
+    for (var i = 0; i < msgs.length; i++)
+    {
+        send(_msg, "Mentors page " + (i + 1).toString(), msgs[i]);
+    }
+}
+
+async function EndSessionCommand(_msg, _params)
+{
+    if (_msg.channel.name.substring(0, 7) == "session")
+    {
+        _msg.guild.channels.get(_msg.channel.id).delete();
+    }
+}
+
+async function RequestMentorCommand(_msg, _params)
+{
+    var found = false;
+
+    _msg.guild.channels.forEach(function (chanObj, key) {
+        if (chanObj.name.toLowerCase() === "mentors" && chanObj.type === "text" && !found) {
+            var stringToSend = `\n\nThe user <@${_msg.member.id}> requested a **${_params.join(" ")}** mentor! Click the white checkmark to accept.`;
+            if (servers[_msg.guild.id].mentorDict[_params.join(" ").toLowerCase()])
+            {
+                if (servers[_msg.guild.id].mentorDict[_params.join(" ").toLowerCase()].mentorIDs.length > 0)
+                {
+                    for (var i = 0; i < servers[_msg.guild.id].mentorDict[_params.join(" ").toLowerCase()].mentorIDs.length; i++)
+                    {
+                        var stringToAdd = "<@!" + servers[_msg.guild.id].mentorDict[_params.join(" ").toLowerCase()].mentorIDs[i] + ">";
+
+                        if (i + 1 === servers[_msg.guild.id].mentorDict[_params.join(" ").toLowerCase()].mentorIDs.length)
+                        {
+                            stringToAdd += ", ";
+                        }
+
+                        stringToSend = stringToAdd + stringToSend;
+                    }
+
+                    chanObj.send(stringToSend).then(function (sentMsg) { sentMsg.react("✅"); });
+                    found = true;
+                }
+            }
+            else
+            {
+                chanObj.send(stringToSend).then(function (sentMsg) { sentMsg.react("✅"); });
+                found = true;
+            }
+        }
+    }.bind(found));
+}
+
+async function CommandDownForMaintenance(_msg, _params)
+{
+    send(_msg, "Down for maintenance", "The command you provided is down for maintenance right now!");
+}
+
+
+async function send(_msg, _title, _str) {
+    var embed = new Discord.RichEmbed().setTitle(_title).setDescription(_str).setColor([0, 18, 68]).setTimestamp().setFooter("Executed by " + _msg.member.displayName, _msg.member.user.avatarURL);
+    _msg.channel.send({ embed });
+}
+
+function getParts(_msgString) {
     var inBrackets = false;
     var rightAfterBrackets = false;
 
-    var currentParam = "";
+    var currentPart = "";
 
-    var params = new Array();
+    var parts = new Array();
 
-    for (i = 0; i < _str.length; i++) {
-        if (_str[i] === "[" && !inBrackets) {
+    for (i = 0; i < _msgString.length; i++) {
+        if (_msgString[i] === "[" && !inBrackets) {
             inBrackets = true;
             continue;
-        } else if (_str[i] === "]" && inBrackets) {
+        } else if (_msgString[i] === "]" && inBrackets) {
             inBrackets = false;
-            params.push(currentParam);
-            currentParam = "";
+            parts.push(currentPart);
+            currentPart = "";
             rightAfterBrackets = true;
             continue;
         }
 
         if (rightAfterBrackets && !inBrackets) {
-            if (_str[i] === " " || _str[i] === "[") {
+            if (_msgString[i] === " " || _msgString[i] === "[") {
                 rightAfterBrackets = false;
                 continue;
             }
         } else if (!rightAfterBrackets && !inBrackets) {
-            if (_str[i] === " ") {
-                params.push(currentParam);
-                currentParam = "";
+            if (_msgString[i] === " ") {
+                parts.push(currentPart);
+                currentPart = "";
                 continue;
             }
         }
 
-        currentParam += _str[i];
+        currentPart += _msgString[i];
     }
 
-    params.push(currentParam);
+    parts.push(currentPart);
 
-    return params;
+    return parts;
 }
 
-client.on('message', async (message) => {
-    if (message.toString().toLowerCase().substring(0, 1) === prefix) {
-        var command = message.toString().substr(prefix.length, message.toString().indexOf(' ') - 1);
-        if (command === "") command = message.toString().substr(prefix.length);
+client.on("messageReactionAdd", async function (_react, _user) {
+    if (_react.message.author.id !== client.user.id)
+        return;
+    if (_react.message.channel.name.toLowerCase() !== "mentors")
+        return;
+    if (_user.id === client.user.id)
+        return;
+    if (_react.emoji.name !== "✅")
+        return;
 
-        var params = getParams(message.toString().substr(command.length + 2, message.toString().length));
+    var msg = _react.message;
+    var content = msg.toString();
 
-        if (command === "setprefix") {
-            if (message.member.hasPermission("ADMINISTRATOR")) {
-                if (params.length > 0) {
-                    prefix = params[0];
+    var topicName = content.substring(content.indexOf("**") + 2, content.lastIndexOf("**"));
+    var requesterID = content.substring(content.lastIndexOf("<") + 1, content.lastIndexOf(">"));
+    if (requesterID[0] === "@")
+        requesterID = requesterID.substring(1, requesterID.length);
+    if (requesterID[0] === "!")
+        requesterID = requesterID.substring(1, requesterID.length);
 
-                    fs.writeFile(appRoot + '/prefix.txt', params[0], function (err) {
+    var requester = msg.guild.members.get(requesterID);
 
-                    });
+    console.log(requesterID);
 
-                    var everyoneRole = message.guild.roles.find('name', '@everyone')
+    if (requesterID === _user.id)
+        return;
+    if (content[0] === "~")
+        return;
 
-                    message.channel.send(everyoneRole.toString() + ", This server now uses the prefix \"***" + params[0] + "***\" for commands!");
-                    client.user.setGame(prefix + "help");
-                }
-                else {
-                    message.reply("This command can't be called without a parameter!");
-                }
-            }
-        } else if (command === "requestmentor") {
-            if (params.length > 0) {
-                var requestType = "";
-                for (i = 0; i < params.length; i++) {
-                    requestType += params[i] + " ";
-                }
-                requestType = requestType.substring(0, requestType.length - 1);
+    if (!(topicName.toLowerCase() in servers[msg.guild.id].mentorDict))
+    {
+        runningSessions.push(new Session(msg.guild.members.get(_user.id), requester));
+        requester.send(`Your request for a ${topicName} mentor has been accepted by ${_user.username}!`);
+        msg.edit("~~" + content + "~~");
+    }
+    else
+    {
+        if (servers[msg.guild.id].mentorDict[topicName.toLowerCase()].mentorIDs.includes(_user.id))
+        {
+            runningSessions.push(new Session(msg.guild.members.get(_user.id), requester));
+            requester.send(`Your request for a ${topicName} mentor has been accepted by ${_user.username}!`);
+            msg.edit("~~" + content + "~~");
+        }
+    }
+});
 
-                for (var key in topicAliases) {
-                    if (key === requestType) {
-                        requestType = topicAliases[key];
-                    }
-                }
+client.on('message', async message => {
+    if (message.channel.type === "dm")
+        return;
+    if (message.member.user.bot !== false || servers[message.guild.id].prefix !== message.toString().substring(0, servers[message.guild.id].prefix.length))
+        return;
 
-                message.guild.roles.forEach(function (rol) {
-                    if (rol.name.length > 6) {
-                        if (rol.name.substring(0, rol.name.length - 7).toLowerCase() === requestType.toLowerCase()) {
-                            message.guild.channels.forEach(function (channel) {
-                                if (channel.name === "mentors") {
-                                    channel.send("<@&" + rol.id + ">" + ", The user <@" + message.author.id + "> requested a **" + requestType + "** mentor! Click the ***white check mark*** to accept the request.").then(function (sm) { sm.react("✅"); });
-                                    message.member.send("Sent your request!");
-                                }
-                            });
-                        }
-                    }
-                });
-            }
-        } else if (command === "endsession") {
-            runningSession.forEach(function (s) {
-                if (s.sessionID === message.channel.name) {
-                    s.endSession();
-                }
+
+    var msgString = message.toString().substring(1, message.toString().length);
+    var msgParts = getParts(msgString);
+
+    if (msgParts[0].toLowerCase() in groupCommands) {
+        var group = msgParts[0].toLowerCase();
+
+        if (msgParts[1].toLowerCase() in groupCommands[group].commands) {
+            var command = msgParts[0].toLowerCase();
+            var params = msgParts.splice(2, msgParts.length);
+
+            groupCommands[msgParts[0].toLowerCase()].commands[msgParts[1].toLowerCase()].execute(message, params);
+        }
+        else {
+            send(message, "Invalid command", `The command **${msgParts[1]}** does not exist in the group ${msgParts[0]}!`);
+        }
+    }
+    else {
+        if (msgParts[0].toLowerCase() in grouplessCommands) {
+            var params = msgParts.splice(1, msgParts.length);
+            grouplessCommands[msgParts[0].toLowerCase()].execute(message, params);
+        }
+        else {
+            send(message, "Invalid command", `The command **${msgParts[0]}** does not exist!`);
+        }
+    }
+});
+
+client.on('guildCreate', guildObj => {
+    servers[guildObj.id.toString()] = new Server(guildObj);
+});
+
+client.on('ready', () => {
+    client.user.setGame("&requestmentor");
+
+    client.guilds.forEach(function (_guildObj, _key) {
+        servers[_key.toString()] = new Server(_guildObj);
+    });
+
+    fs.readdirSync(`${appRoot}/serverconfig/`).forEach(folder => {
+        if (fs.existsSync(`${appRoot}/serverconfig/${folder}/sessions/`)) {
+            fs.readdirSync(`${appRoot}/serverconfig/${folder}/sessions/`).forEach(file => {
+                var fContent = fs.readFileSync(`${appRoot}/serverconfig/${folder}/sessions/${file}`, 'utf8');
+                runningSessions.push(new Session(client.guilds.get(folder).members.get(fContent), null, file.substring(0, file.length - 4), client.guilds.get(folder).id));
             });
-        } else if (command === "topicalias") {
-            if (params.length > 1) {
-                topicAliases[params[1]] = params[0];
-
-                var str = "";
-
-                for (var key in topicAliases) {
-                    if (!topicAliases.hasOwnProperty(key)) continue;
-                    str += "[" + key + "] [" + topicAliases[key] + "]\r\n";
-                }
-
-                str = str.substr(0, str.length - 2);
-
-                fs.writeFile(appRoot + '/topic_aliases.txt', str, function (err) {
-
-                })
-            }
-        } else if (command === "help") {
-            var msg = "KDT-Bot is a Discord bot developed by <@138988491240505345> for the Krypton Development Team.\n\n";
-            msg += "**help**: Sends you this message.\n\n";
-            msg += "**requestmentor**: Must be called with a parameter. Request help for the specified topic.\n\n";
-            msg += "**setprefix**: Administrators only and needs a parameter. Sets the global prefix of the bot."
-            //msg += "**";
-            message.member.send(msg);
         }
-    }
-});
-
-client.on("messageReactionAdd", async (msg) => {
-    if (msg.message.member.id = client.user.id) {
-        this.reqID = msg.message.toString().substring(msg.message.toString().lastIndexOf("<") + 2, msg.message.toString().lastIndexOf(">"));
-        if (/^\d+$/.test(this.reqID)) {
-            if (msg.users.size > 1) {
-                var men = msg.users.last();
-
-                this.currentID = men.id;
-
-                msg.message.guild.members.forEach(function (m) {
-                    if (m.id === this.currentID) {
-                        this.member = m;
-                    } else if (m.id === this.reqID) {
-                        this.requestor = m;
-                    }
-                }.bind(this));
-
-                this.allowed = false;
-
-                this.member.roles.forEach(function (rol) {
-                    if (rol.id === msg.message.toString().substr(3, msg.message.toString().indexOf(">") - 3) && this.currentID !== this.reqID) {
-                        this.allowed = true;
-                    }
-                }.bind(this));
-
-                if (!this.allowed)
-                    return;
-
-                this.allowed = false;
-
-                msg.message.edit("~~" + msg.message.content + "~~" + "   accepted by " + men);
-                msg.message.clearReactions();
-
-                this.requestor.send("Your request was accepted!");
-
-                var mentorMember = msg.message.guild.member(men);
-
-                var session = new Session(mentorMember, this.requestor);
-                runningSession.push(session);
-            }
-        }
-    }
-});
-
-client.on("guildMemberAdd", async (user) => {
-    user.guild.defaultChannel.send("Welcome, <@" + user.id + ">!\n\n" + `Use ***${prefix}help*** to get a list of commands\nor ***${prefix}requestmentor*** to *request help for a topic.*`);
-});
-
-client.on("ready", async () => {
-    var filec = fs.readFileSync(appRoot + '/prefix.txt', 'utf8');
-    var lines = filec.split("\r\n");
-
-    client.guilds.forEach(async (g) => {
-        guild = g;
     });
 
-    fs.readdirSync(appRoot + "/sessions/").forEach(file => {
-        runningSession.push(new Session("", "", file.substring(0, file.length - 4)));
-    });
-
-    prefix = lines[0];
-    client.user.setGame(prefix + "help");
-
-    filec = fs.readFileSync(appRoot + '/topic_aliases.txt', 'utf8');
-    lines = filec.split("\r\n");
-
-    lines.forEach((l) => {
-        var parts = getParams(l);
-        var alias = parts[0];
-        var lang = parts[1];
-
-        alias = alias.split('[').join('');
-        alias = alias.split(']').join('');
-        lang = lang.split('[').join('');
-        lang = lang.split(']').join('');
-
-        topicAliases[alias] = lang;
-    });
+    new Command("mentor", "add", 2, MentorAddCommand);
+    new Command("mentor", "remove", 2, MentorRemoveCommand);
+    new Command("mentor", "list", 0, MentorListCommand);
+    new Command("", "requestmentor", 1, RequestMentorCommand);
+    new Command("", "endsession", 0, EndSessionCommand);
+    new Command("", "help", 0, CommandDownForMaintenance);
 });
 
-client.login(process.argv[2]);
+client.login(process.argv.splice(2)[0]);
