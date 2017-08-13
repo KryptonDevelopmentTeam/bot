@@ -215,6 +215,7 @@ class Session {
     addMember(_member) {
         this.server.channels.forEach(function (c) {
             if (c.name === this.sessionID) {
+                console.log("Trying it");
                 c.overwritePermissions(_member, { SEND_MESSAGES: true, READ_MESSAGES: true });
             }
         }.bind(this));
@@ -364,6 +365,22 @@ async function RequestMentorCommand(_msg, _params)
     }.bind(found));
 }
 
+async function AddMemberToSessionCommand(_msg, _params)
+{
+    var userID = _params[0];
+
+    if (/(<@[0-9]{18}>)|(<@![0-9]{18}>)/g.test(userID)) {
+        userID = userID.replace(/[<@!>]/g, "");
+
+        if (!_msg.guild.members.get(userID)) {
+            send(_msg, "Invalid user", "The user you provided is not valid!");
+            return;
+        }
+
+        _msg.guild.members.get(userID).send(`<@${_msg.member.id}> invited you to join ${_msg.channel.name}! Click the white checkmark to accept.`).then(function (sentMsg) { sentMsg.react("✅"); });
+    }
+}
+
 async function CommandDownForMaintenance(_msg, _params)
 {
     send(_msg, "Down for maintenance", "The command you provided is down for maintenance right now!");
@@ -419,8 +436,6 @@ function getParts(_msgString) {
 client.on("messageReactionAdd", async function (_react, _user) {
     if (_react.message.author.id !== client.user.id)
         return;
-    if (_react.message.channel.name.toLowerCase() !== "mentors")
-        return;
     if (_user.id === client.user.id)
         return;
     if (_react.emoji.name !== "✅")
@@ -429,35 +444,46 @@ client.on("messageReactionAdd", async function (_react, _user) {
     var msg = _react.message;
     var content = msg.toString();
 
-    var topicName = content.substring(content.indexOf("**") + 2, content.lastIndexOf("**"));
-    var requesterID = content.substring(content.lastIndexOf("<") + 1, content.lastIndexOf(">"));
-    if (requesterID[0] === "@")
-        requesterID = requesterID.substring(1, requesterID.length);
-    if (requesterID[0] === "!")
-        requesterID = requesterID.substring(1, requesterID.length);
-
-    var requester = msg.guild.members.get(requesterID);
-
-    console.log(requesterID);
-
-    if (requesterID === _user.id)
-        return;
-    if (content[0] === "~")
-        return;
-
-    if (!(topicName.toLowerCase() in servers[msg.guild.id].mentorDict))
+    if (_react.message.channel.type === "dm")
     {
-        runningSessions.push(new Session(msg.guild.members.get(_user.id), requester));
-        requester.send(`Your request for a ${topicName} mentor has been accepted by ${_user.username}!`);
-        msg.edit("~~" + content + "~~");
+        var sessionName = content.split(" ")[5];
+        sessionName = sessionName.substring(0, sessionName.length - 1);
+
+        var doIt = true;
+        runningSessions.forEach(function (sess) {
+            if (sess.sessionID == sessionName) {
+                sess.addMember(_user);
+                sess.sendMessage(`<@${_user.id}> accepted your invitation!`);
+            }
+        }.bind(sessionName));
     }
-    else
+    else if (_react.message.channel.name === "mentors")
     {
-        if (servers[msg.guild.id].mentorDict[topicName.toLowerCase()].mentorIDs.includes(_user.id))
-        {
+        var topicName = content.substring(content.indexOf("**") + 2, content.lastIndexOf("**"));
+        var requesterID = content.substring(content.lastIndexOf("<") + 1, content.lastIndexOf(">"));
+        if (requesterID[0] === "@")
+            requesterID = requesterID.substring(1, requesterID.length);
+        if (requesterID[0] === "!")
+            requesterID = requesterID.substring(1, requesterID.length);
+
+        var requester = msg.guild.members.get(requesterID);
+
+        if (requesterID === _user.id)
+            return;
+        if (content[0] === "~")
+            return;
+
+        if (!(topicName.toLowerCase() in servers[msg.guild.id].mentorDict)) {
             runningSessions.push(new Session(msg.guild.members.get(_user.id), requester));
             requester.send(`Your request for a ${topicName} mentor has been accepted by ${_user.username}!`);
             msg.edit("~~" + content + "~~");
+        }
+        else {
+            if (servers[msg.guild.id].mentorDict[topicName.toLowerCase()].mentorIDs.includes(_user.id)) {
+                runningSessions.push(new Session(msg.guild.members.get(_user.id), requester));
+                requester.send(`Your request for a ${topicName} mentor has been accepted by ${_user.username}!`);
+                msg.edit("~~" + content + "~~");
+            }
         }
     }
 });
@@ -467,7 +493,6 @@ client.on('message', async message => {
         return;
     if (message.member.user.bot !== false || servers[message.guild.id].prefix !== message.toString().substring(0, servers[message.guild.id].prefix.length))
         return;
-
 
     var msgString = message.toString().substring(1, message.toString().length);
     var msgParts = getParts(msgString);
@@ -520,6 +545,7 @@ client.on('ready', () => {
     new Command("mentor", "remove", 2, MentorRemoveCommand);
     new Command("mentor", "list", 0, MentorListCommand);
     new Command("", "requestmentor", 1, RequestMentorCommand);
+    new Command("", "invitemember", 1, AddMemberToSessionCommand);
     new Command("", "endsession", 0, EndSessionCommand);
     new Command("", "help", 0, CommandDownForMaintenance);
 });
