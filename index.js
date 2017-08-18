@@ -180,7 +180,7 @@ class Session {
                 channel.overwritePermissions(_mentor.guild.id, { SEND_MESSAGES: false, READ_MESSAGES: false });
                 channel.overwritePermissions(_mentor, { SEND_MESSAGES: true, READ_MESSAGES: true });
                 channel.overwritePermissions(_student, { SEND_MESSAGES: true, READ_MESSAGES: true });
-                channel.send("Use the command `" + servers[channel.guild.id].prefix + "endsession` to end this session!");
+                channel.send("Use the command `" + servers[channel.guild.id].prefix + "endsession` to end this session or `" + servers[channel.guild.id].prefix + " [mention] to invite a member!");
             }.bind(this));
         } else {
             this.sessionID = _sessionID;
@@ -215,7 +215,6 @@ class Session {
     addMember(_member) {
         this.server.channels.forEach(function (c) {
             if (c.name === this.sessionID) {
-                console.log("Trying it");
                 c.overwritePermissions(_member, { SEND_MESSAGES: true, READ_MESSAGES: true });
             }
         }.bind(this));
@@ -333,39 +332,29 @@ async function RequestMentorCommand(_msg, _params)
 {
     var found = false;
 
-    _msg.guild.channels.forEach(function (chanObj, key) {
-        if (chanObj.name.toLowerCase() === "mentors" && chanObj.type === "text" && !found) {
-            var stringToSend = `\n\nThe user <@${_msg.member.id}> requested a **${_params.join(" ")}** mentor! Click the white checkmark to accept.`;
-            if (servers[_msg.guild.id].mentorDict[_params.join(" ").toLowerCase()])
-            {
-                if (servers[_msg.guild.id].mentorDict[_params.join(" ").toLowerCase()].mentorIDs.length > 0)
-                {
-                    for (var i = 0; i < servers[_msg.guild.id].mentorDict[_params.join(" ").toLowerCase()].mentorIDs.length; i++)
-                    {
-                        var stringToAdd = "<@!" + servers[_msg.guild.id].mentorDict[_params.join(" ").toLowerCase()].mentorIDs[i] + ">";
+    var stringToSend = `\n\nThe user <@${_msg.member.id}> requested a **${_params.join(" ")}** mentor! Click the white checkmark to accept.`;
 
-                        if (i + 1 === servers[_msg.guild.id].mentorDict[_params.join(" ").toLowerCase()].mentorIDs.length)
-                        {
-                            stringToAdd += ", ";
-                        }
-
-                        stringToSend = stringToAdd + stringToSend;
-                    }
-
-                    chanObj.send(stringToSend).then(function (sentMsg) { sentMsg.react("✅"); });
-                    found = true;
-                }
+    if (servers[_msg.guild.id].mentorDict[_params.join(" ").toLowerCase()])
+    {
+        if (servers[_msg.guild.id].mentorDict[_params.join(" ").toLowerCase()].mentorIDs.length > 0)
+        {
+            for (var i = 0; i < servers[_msg.guild.id].mentorDict[_params.join(" ").toLowerCase()].mentorIDs.length; i++) {
+                var stringToAdd = "<@!" + servers[_msg.guild.id].mentorDict[_params.join(" ").toLowerCase()].mentorIDs[i] + ">";
+                stringToSend = stringToAdd + stringToSend;
             }
-            else
-            {
-                chanObj.send(stringToSend).then(function (sentMsg) { sentMsg.react("✅"); });
-                found = true;
-            }
+
+            _msg.member.send(`Sent your request for a ${_params.join(" ")} mentor!`);
+            servers[_msg.guild.id].requestChannel.send(stringToSend).then(function (sentMsg) { sentMsg.react("✅"); });
         }
-    }.bind(found));
+    }
+    else
+    {
+        _msg.member.send(`Sent your request for a ${_params.join(" ")} mentor!`);
+        servers[_msg.guild.id].requestChannel.send(stringToSend).then(function (sentMsg) { sentMsg.react("✅"); });
+    }
 }
 
-async function AddMemberToSessionCommand(_msg, _params)
+async function InviteCommand(_msg, _params)
 {
     var userID = _params[0];
 
@@ -457,7 +446,7 @@ client.on("messageReactionAdd", async function (_react, _user) {
             }
         }.bind(sessionName));
     }
-    else if (_react.message.channel.name === "mentors")
+    else if (_react.message.channel.name === "mentor-requests")
     {
         var topicName = content.substring(content.indexOf("**") + 2, content.lastIndexOf("**"));
         var requesterID = content.substring(content.lastIndexOf("<") + 1, content.lastIndexOf(">"));
@@ -482,7 +471,7 @@ client.on("messageReactionAdd", async function (_react, _user) {
             if (servers[msg.guild.id].mentorDict[topicName.toLowerCase()].mentorIDs.includes(_user.id)) {
                 runningSessions.push(new Session(msg.guild.members.get(_user.id), requester));
                 requester.send(`Your request for a ${topicName} mentor has been accepted by ${_user.username}!`);
-                msg.edit("~~" + content + "~~");
+                msg.edit("~~" + content + "~~" + "  accepted by " + _user.username);
             }
         }
     }
@@ -529,7 +518,20 @@ client.on('ready', () => {
     client.user.setGame("&requestmentor");
 
     client.guilds.forEach(function (_guildObj, _key) {
+        var foundRequestChannel = false;
+
         servers[_key.toString()] = new Server(_guildObj);
+
+        _guildObj.channels.forEach(function (chanObj, key) {
+            if (chanObj.name.toLowerCase() === "mentor-requests") {
+                servers[_key.toString()].requestChannel = chanObj;
+                foundRequestChannel = true;
+            }
+        });
+
+        if (foundRequestChannel === false) {
+            _guildObj.createChannel("mentor-requests", "text").then(function (channel) { channel.overwritePermissions(_guildObj.id, { SEND_MESSAGES: false }); servers[_key.toString()].requestChannel = channel; }.bind(_guildObj));
+        }
     });
 
     fs.readdirSync(`${appRoot}/serverconfig/`).forEach(folder => {
@@ -545,7 +547,7 @@ client.on('ready', () => {
     new Command("mentor", "remove", 2, MentorRemoveCommand);
     new Command("mentor", "list", 0, MentorListCommand);
     new Command("", "requestmentor", 1, RequestMentorCommand);
-    new Command("", "invitemember", 1, AddMemberToSessionCommand);
+    new Command("", "invite", 1, InviteCommand);
     new Command("", "endsession", 0, EndSessionCommand);
     new Command("", "help", 0, CommandDownForMaintenance);
 });
